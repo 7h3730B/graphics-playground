@@ -15,6 +15,7 @@
 #include <optional>
 #include <cstdint> // for UINT32_MAX
 #include <algorithm> // Necessary for std::min/std::max
+#include <fstream>
 
 #define WIDTH 800
 #define HEIGHT 600
@@ -26,6 +27,25 @@ const std::vector<const char*> validationLayers = {
 const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
+
+static std::vector<char> readFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("failed to open file");
+    }
+
+    // As we start from the back (ate) we can tell how big the file is from the cursor position
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<char> buffer(fileSize);
+
+    // Go to the beginning of the file
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+
+    file.close();
+    return buffer;
+}
 
 #ifdef NDEBUG
     const bool enableValidationLayers = false;
@@ -116,6 +136,59 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        // Graphics Pipeline needs to be build from 'scratch'
+        createGraphicsPipeline();
+    }
+
+    void createGraphicsPipeline() {
+        // shaders as SPIR-V bytecode
+        auto vertShaderCode = readFile("shaders/vert.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
+
+        // Can be destroied as soon as the pipeline was build because they are just thin wrappers
+        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertShaderStageInfo.module = vertShaderModule;
+        // The entrypoint
+        vertShaderStageInfo.pName = "main";
+        // (optional) pSpecializationInfo allows to specify constant values before it gets compiled to allow for optimazations
+        vertShaderStageInfo.pSpecializationInfo = nullptr;
+
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+        // The entrypoint
+        fragShaderStageInfo.pName = "main";
+        // (optional) pSpecializationInfo allows to specify constant values before it gets compiled to allow for optimazations
+        fragShaderStageInfo.pSpecializationInfo = nullptr;
+
+        VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+
+
+
+        // Destroy the Shader Modules
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    }
+
+    VkShaderModule createShaderModule(const std::vector<char>& code) {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create shader module!");
+        }
+
+        return shaderModule;
     }
 
     void createImageViews() {
